@@ -4,3 +4,4 @@ quicktype:
     dockerfile: Dockerfile
   environment:
     CI: true
+    CPUs: 2
