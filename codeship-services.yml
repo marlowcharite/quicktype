@@ -1,0 +1,6 @@
+quicktype:
+  build:
+    image: quicktype
+    dockerfile: Dockerfile
+  environment:
+    CI: true
