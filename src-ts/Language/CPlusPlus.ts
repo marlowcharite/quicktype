@@ -8,6 +8,7 @@ import {
     TopLevels,
     NamedType,
     ClassType,
+    EnumType,
     UnionType,
     nullableFromUnion,
     matchType,
@@ -261,6 +262,10 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         return this._memberNamingFunction;
     }
 
+    protected get caseNamer(): Namer {
+        throw "FIXME: support enums";
+    }
+
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
         if (type.isNamedType()) {
             return type;
@@ -448,6 +453,10 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         );
     };
 
+    private emitEnum = (e: EnumType, enumName: Name): void => {
+        throw "FIXME: support enums";
+    };
+
     private emitUnionTypedefs = (u: UnionType, unionName: Name): void => {
         this.emitLine("typedef ", this.variantType(u, false), " ", unionName, ";");
     };
@@ -595,6 +604,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
                 "leading-and-interposing",
                 true,
                 this.emitClass,
+                this.emitEnum,
                 this.emitUnionTypedefs
             );
             this.forEachTopLevel("leading", this.emitTopLevelTypedef);

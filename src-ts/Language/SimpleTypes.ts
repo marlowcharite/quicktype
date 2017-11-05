@@ -102,6 +102,10 @@ class SimpleTypesRenderer extends ConvenienceRenderer {
         return new Namer(n => simpleNameStyle(n, false), []);
     }
 
+    protected get caseNamer(): Namer {
+        return new Namer(n => simpleNameStyle(n, true), []);
+    }
+
     protected topLevelDependencyNames(topLevelName: Name): DependencyName[] {
         return [];
     }
@@ -151,7 +155,12 @@ class SimpleTypesRenderer extends ConvenienceRenderer {
     };
 
     emitEnum = (e: EnumType, enumName: Name) => {
-        this.emitLine("enum ", enumName, " = ", intercalate(" | ", e.cases).toArray());
+        const caseNames: Sourcelike[] = [];
+        this.forEachCase(e, "none", name => {
+            if (caseNames.length > 0) caseNames.push(" | ");
+            caseNames.push(name);
+        });
+        this.emitLine("enum ", enumName, " = ", caseNames);
     };
 
     emitUnion = (u: UnionType, unionName: Name) => {

@@ -87,6 +87,10 @@ class GoRenderer extends ConvenienceRenderer {
         return namingFunction;
     }
 
+    protected get caseNamer(): Namer {
+        throw "FIXME: support enums";
+    }
+
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
         if (type.isNamedType()) {
             return type;

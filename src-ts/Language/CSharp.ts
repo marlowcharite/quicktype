@@ -171,6 +171,10 @@ class CSharpRenderer extends ConvenienceRenderer {
         return namingFunction;
     }
 
+    protected get caseNamer(): Namer {
+        throw "FIXME: support enums";
+    }
+
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
         const definedTypes = type.directlyReachableNamedTypes;
         if (definedTypes.size > 1) {

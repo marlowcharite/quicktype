@@ -35,6 +35,7 @@ export abstract class ConvenienceRenderer extends Renderer {
     private _topLevelNames: Map<string, Name>;
     private _namesForNamedTypes: Map<NamedType, Name>;
     private _propertyNames: Map<ClassType, Map<string, Name>>;
+    private _caseNames: Map<EnumType, Map<string, Name>>;
 
     private _namedTypes: OrderedSet<NamedType>;
     private _namedClasses: OrderedSet<ClassType>;
@@ -53,6 +54,13 @@ export abstract class ConvenienceRenderer extends Renderer {
         return { names: [], namespaces: [] };
     }
 
+    protected forbiddenForCases(
+        e: EnumType,
+        enumNamed: Name
+    ): { names: Name[]; namespaces: Namespace[] } {
+        return { names: [], namespaces: [] };
+    }
+
     protected topLevelDependencyNames(topLevelName: Name): DependencyName[] {
         return [];
     }
@@ -60,6 +68,7 @@ export abstract class ConvenienceRenderer extends Renderer {
     protected abstract topLevelNameStyle(rawName: string): string;
     protected abstract get namedTypeNamer(): Namer;
     protected abstract get propertyNamer(): Namer;
+    protected abstract get caseNamer(): Namer;
     protected abstract namedTypeToNameForTopLevel(type: Type): NamedType | null;
     protected abstract emitSourceStructure(): void;
 
@@ -73,13 +82,17 @@ export abstract class ConvenienceRenderer extends Renderer {
         const namedUnions = unions.filter((u: UnionType) => this.unionNeedsName(u)).toOrderedSet();
         this._namesForNamedTypes = Map();
         this._propertyNames = Map();
+        this._caseNames = Map();
         this._topLevelNames = this.topLevels.map(this.nameForTopLevel).toMap();
         classes.forEach((c: ClassType) => {
             const named = this.addNamedForNamedType(c);
             this.addPropertyNameds(c, named);
         });
         namedUnions.forEach((u: UnionType) => this.addNamedForNamedType(u));
-        enums.forEach((e: EnumType) => this.addNamedForNamedType(e));
+        enums.forEach((e: EnumType) => {
+            const named = this.addNamedForNamedType(e);
+            this.addCaseNameds(e, named);
+        });
         return [this.globalNamespace];
     }
 
@@ -131,6 +144,25 @@ export abstract class ConvenienceRenderer extends Renderer {
             })
             .toMap();
         this._propertyNames = this._propertyNames.set(c, names);
+    };
+
+    // FIXME: this is very similar to addPropertyNameds
+    private addCaseNameds = (e: EnumType, enumNamed: Name): void => {
+        const { names: forbiddenNames, namespaces: forbiddenNamespace } = this.forbiddenForCases(
+            e,
+            enumNamed
+        );
+        const ns = new Namespace(
+            e.names.combined,
+            this.globalNamespace,
+            Set(forbiddenNamespace),
+            Set(forbiddenNames)
+        );
+        let names = Map<string, Name>();
+        e.cases.forEach((name: string) => {
+            names = names.set(name, ns.add(new SimpleName(name, this.caseNamer)));
+        });
+        this._caseNames = this._caseNames.set(e, names);
     };
 
     private childrenOfType = (t: Type): OrderedSet<Type> => {
@@ -207,6 +239,16 @@ export abstract class ConvenienceRenderer extends Renderer {
             const t = defined(c.properties.get(jsonName));
             f(name, jsonName, t);
         });
+    };
+
+    protected forEachCase = (
+        e: EnumType,
+        blankLocations: BlankLineLocations,
+        f: (name: Name, jsonName: string) => void
+    ): void => {
+        const caseNames = defined(this._caseNames.get(e));
+        const sortedCaseNames = caseNames.sortBy((n: Name) => this.names.get(n)).toOrderedMap();
+        this.forEachWithBlankLines(sortedCaseNames, blankLocations, f);
     };
 
     protected callForNamedType<T extends NamedType>(t: T, f: (t: T, name: Name) => void): void {
