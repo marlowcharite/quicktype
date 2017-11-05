@@ -21,6 +21,7 @@ import {
     legalizeCharacters,
     camelCase,
     underscoreCase,
+    upperUnderscoreCase,
     startWithLetter,
     isAscii,
     isLetterOrUnderscore,
@@ -33,12 +34,13 @@ import { RenderResult } from "../Renderer";
 import { ConvenienceRenderer } from "../ConvenienceRenderer";
 import { StringOption, EnumOption } from "../RendererOptions";
 
-type NamingStyle = "pascal" | "camel" | "underscore";
+type NamingStyle = "pascal" | "camel" | "underscore" | "upper-underscore";
 
 export default class CPlusPlusTargetLanguage extends TypeScriptTargetLanguage {
     private readonly _namespaceOption: StringOption;
     private readonly _typeNamingStyleOption: EnumOption<NamingStyle>;
     private readonly _memberNamingStyleOption: EnumOption<NamingStyle>;
+    private readonly _enumeratorNamingStyleOption: EnumOption<NamingStyle>;
     private readonly _uniquePtrOption: EnumOption<boolean>;
 
     constructor() {
@@ -51,15 +53,24 @@ export default class CPlusPlusTargetLanguage extends TypeScriptTargetLanguage {
         const pascalValue: [string, NamingStyle] = ["pascal-case", "pascal"];
         const underscoreValue: [string, NamingStyle] = ["underscore-case", "underscore"];
         const camelValue: [string, NamingStyle] = ["camel-case", "camel"];
+        const upperUnderscoreValue: [string, NamingStyle] = [
+            "upper-underscore-case",
+            "upper-underscore"
+        ];
         const typeNamingStyleOption = new EnumOption<NamingStyle>(
             "type-style",
             "Naming style for types",
-            [pascalValue, underscoreValue, camelValue]
+            [pascalValue, underscoreValue, camelValue, upperUnderscoreValue]
         );
         const memberNamingStyleOption = new EnumOption<NamingStyle>(
             "member-style",
             "Naming style for members",
-            [underscoreValue, pascalValue, camelValue]
+            [underscoreValue, pascalValue, camelValue, upperUnderscoreValue]
+        );
+        const enumeratorNamingStyleOption = new EnumOption<NamingStyle>(
+            "enumerator-style",
+            "Naming style for enumerators",
+            [upperUnderscoreValue, underscoreValue, pascalValue, camelValue]
         );
         const uniquePtrOption = new EnumOption(
             "unions",
@@ -70,11 +81,13 @@ export default class CPlusPlusTargetLanguage extends TypeScriptTargetLanguage {
             namespaceOption.definition,
             typeNamingStyleOption.definition,
             memberNamingStyleOption.definition,
+            enumeratorNamingStyleOption.definition,
             uniquePtrOption.definition
         ]);
         this._namespaceOption = namespaceOption;
         this._typeNamingStyleOption = typeNamingStyleOption;
         this._memberNamingStyleOption = memberNamingStyleOption;
+        this._enumeratorNamingStyleOption = enumeratorNamingStyleOption;
         this._uniquePtrOption = uniquePtrOption;
     }
 
@@ -84,6 +97,7 @@ export default class CPlusPlusTargetLanguage extends TypeScriptTargetLanguage {
             this._namespaceOption.getValue(optionValues),
             this._typeNamingStyleOption.getValue(optionValues),
             this._memberNamingStyleOption.getValue(optionValues),
+            this._enumeratorNamingStyleOption.getValue(optionValues),
             this._uniquePtrOption.getValue(optionValues)
         );
         return renderer.render();
@@ -94,16 +108,24 @@ const legalizeName = legalizeCharacters(cp => isAscii(cp) && isLetterOrUnderscor
 
 function cppNameStyle(namingStyle: NamingStyle): (rawName: string) => string {
     let caser: (uncased: string) => string;
+    let upper: boolean;
 
     switch (namingStyle) {
         case "pascal":
             caser = camelCase;
+            upper = true;
             break;
         case "camel":
             caser = camelCase;
+            upper = false;
             break;
         case "underscore":
             caser = underscoreCase;
+            upper = false;
+            break;
+        case "upper-underscore":
+            caser = upperUnderscoreCase;
+            upper = true;
             break;
         default:
             return assertNever(namingStyle);
@@ -112,7 +134,7 @@ function cppNameStyle(namingStyle: NamingStyle): (rawName: string) => string {
     return (original: string) => {
         const legalized = legalizeName(original);
         const cased = caser(legalized);
-        return startWithLetter(isLetterOrUnderscore, namingStyle === "pascal", cased);
+        return startWithLetter(isLetterOrUnderscore, upper, cased);
     };
 }
 
@@ -222,6 +244,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
     private readonly _typeNameStyle: (rawName: string) => string;
     private readonly _typeNamingFunction: Namer;
     private readonly _memberNamingFunction: Namer;
+    private readonly _caseNamingFunction: Namer;
     private readonly _optionalType: string;
 
     constructor(
@@ -229,6 +252,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         private readonly _namespaceName: string,
         _typeNamingStyle: NamingStyle,
         _memberNamingStyle: NamingStyle,
+        _enumeratorNamingStyle: NamingStyle,
         private readonly _uniquePtr: boolean
     ) {
         super(topLevels);
@@ -236,6 +260,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         this._typeNameStyle = cppNameStyle(_typeNamingStyle);
         this._typeNamingFunction = funPrefixNamer(this._typeNameStyle);
         this._memberNamingFunction = funPrefixNamer(cppNameStyle(_memberNamingStyle));
+        this._caseNamingFunction = funPrefixNamer(cppNameStyle(_enumeratorNamingStyle));
         this._optionalType = _uniquePtr ? "std::unique_ptr" : "boost::optional";
     }
 
@@ -263,7 +288,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
     }
 
     protected get caseNamer(): Namer {
-        throw "FIXME: support enums";
+        return this._caseNamingFunction;
     }
 
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
@@ -366,9 +391,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
                 this.cppType(mapType.values, false, inJsonNamespace, withIssues),
                 ">"
             ],
-            enumType => {
-                throw "FIXME: enums not supported";
-            },
+            enumType => [this.ourQualifier(inJsonNamespace), this.nameForNamedType(enumType)],
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (!nullable)
@@ -454,7 +477,12 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
     };
 
     private emitEnum = (e: EnumType, enumName: Name): void => {
-        throw "FIXME: support enums";
+        const caseNames: Sourcelike[] = [];
+        this.forEachCase(e, "none", name => {
+            if (caseNames.length > 0) caseNames.push(", ");
+            caseNames.push(name);
+        });
+        this.emitLine("enum class ", enumName, " { ", caseNames, " };");
     };
 
     private emitUnionTypedefs = (u: UnionType, unionName: Name): void => {
@@ -512,6 +540,55 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
                             this.emitLine("break;");
                         });
                         i++;
+                    });
+                    this.emitLine('default: throw "Input JSON does not conform to schema";');
+                });
+            }
+        );
+    };
+
+    private emitEnumFunctions = (e: EnumType, enumName: Name): void => {
+        const ourQualifier = this.ourQualifier(true);
+        this.emitBlock(
+            ["inline void from_json(const json& _j, ", ourQualifier, enumName, "& _x)"],
+            false,
+            () => {
+                let onFirst = true;
+                this.forEachCase(e, "none", (name, jsonName) => {
+                    const maybeElse = onFirst ? "" : "else ";
+                    this.emitLine(
+                        maybeElse,
+                        'if (_j == "',
+                        stringEscape(jsonName),
+                        '") _x = ',
+                        ourQualifier,
+                        enumName,
+                        "::",
+                        name,
+                        ";"
+                    );
+                    onFirst = false;
+                });
+                this.emitLine('else throw "Input JSON does not conform to schema";');
+            }
+        );
+        this.emitNewline();
+        this.emitBlock(
+            ["inline void to_json(json& _j, const ", ourQualifier, enumName, "& _x)"],
+            false,
+            () => {
+                this.emitBlock("switch (_x)", false, () => {
+                    this.forEachCase(e, "none", (name, jsonName) => {
+                        this.emitLine(
+                            "case ",
+                            ourQualifier,
+                            enumName,
+                            "::",
+                            name,
+                            ': _j = "',
+                            stringEscape(jsonName),
+                            '"; break;'
+                        );
                     });
                     this.emitLine('default: throw "This should not happen";');
                 });
@@ -631,6 +708,7 @@ inline ${this._optionalType}<T> get_optional(const json &j, const char *property
                 this.emitOptionalHelpers();
             }
             this.forEachClass("leading-and-interposing", this.emitClassFunctions);
+            this.forEachEnum("leading-and-interposing", this.emitEnumFunctions);
             if (this.haveUnions) {
                 this.emitNewline();
                 this.emitAllUnionFunctions();
