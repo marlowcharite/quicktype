@@ -65,6 +65,10 @@ export abstract class ConvenienceRenderer extends Renderer {
         return [];
     }
 
+    protected namedTypeDependencyNames(t: NamedType, name: Name): DependencyName[] {
+        return [];
+    }
+
     protected abstract topLevelNameStyle(rawName: string): string;
     protected abstract get namedTypeNamer(): Namer;
     protected abstract get propertyNamer(): Namer;
@@ -123,6 +127,12 @@ export abstract class ConvenienceRenderer extends Renderer {
         if (existing !== undefined) return existing;
         const name = type.names.combined;
         const named = this.globalNamespace.add(new SimpleName(name, this.namedTypeNamer));
+
+        const dependencyNames = this.namedTypeDependencyNames(type, named);
+        for (const dn of dependencyNames) {
+            this.globalNamespace.add(dn);
+        }
+
         this._namesForNamedTypes = this._namesForNamedTypes.set(type, named);
         return named;
     };
@@ -188,6 +198,14 @@ export abstract class ConvenienceRenderer extends Renderer {
 
     protected get haveUnions(): boolean {
         return this._haveUnions;
+    }
+
+    protected get enums(): OrderedSet<EnumType> {
+        return this._namedEnums;
+    }
+
+    protected get haveEnums(): boolean {
+        return !this._namedEnums.isEmpty();
     }
 
     protected unionFieldName = (fieldType: Type): string => {

@@ -1,6 +1,6 @@
 "use strict";
 
-import { List, Collection, OrderedMap } from "immutable";
+import { List, Collection, OrderedMap, OrderedSet, Map } from "immutable";
 import {
     TopLevels,
     Type,
@@ -25,17 +25,13 @@ import {
     defined,
     assertNever
 } from "../Support";
-import { Namespace, Name, Namer, funPrefixNamer } from "../Naming";
+import { Namespace, Name, DependencyName, Namer, funPrefixNamer } from "../Naming";
 import { PrimitiveTypeKind, TypeKind } from "Reykjavik";
 import { RenderResult } from "../Renderer";
 import { ConvenienceRenderer } from "../ConvenienceRenderer";
 import { TypeScriptTargetLanguage } from "../TargetLanguage";
 import { BooleanOption, StringOption, EnumOption } from "../RendererOptions";
-import {
-    IssueAnnotationData,
-    anyTypeIssueAnnotation,
-    nullTypeIssueAnnotation
-} from "../Annotation";
+import { IssueAnnotationData, anyTypeIssueAnnotation, nullTypeIssueAnnotation } from "../Annotation";
 
 const unicode = require("unicode-properties");
 
@@ -50,30 +46,16 @@ export default class CSharpTargetLanguage extends TypeScriptTargetLanguage {
     private readonly _versionOption: EnumOption<Version>;
 
     constructor() {
-        const listOption = new EnumOption("array-type", "Use T[] or List<T>", [
-            ["array", false],
-            ["list", true]
-        ]);
-        const denseOption = new EnumOption("density", "Property density", [
-            ["normal", false],
-            ["dense", true]
-        ]);
+        const listOption = new EnumOption("array-type", "Use T[] or List<T>", [["array", false], ["list", true]]);
+        const denseOption = new EnumOption("density", "Property density", [["normal", false], ["dense", true]]);
         const featuresOption = new EnumOption("features", "Output features", [
             ["complete", { helpers: true, attributes: true }],
             ["attributes-only", { helpers: false, attributes: true }],
             ["just-types", { helpers: false, attributes: false }]
         ]);
         // FIXME: Do this via a configurable named eventually.
-        const namespaceOption = new StringOption(
-            "namespace",
-            "Generated namespace",
-            "NAME",
-            "QuickType"
-        );
-        const versionOption = new EnumOption<Version>("csharp-version", "C# version", [
-            ["6", 6],
-            ["5", 5]
-        ]);
+        const namespaceOption = new StringOption("namespace", "Generated namespace", "NAME", "QuickType");
+        const versionOption = new EnumOption<Version>("csharp-version", "C# version", [["6", 6], ["5", 5]]);
         const options = [namespaceOption, versionOption, denseOption, listOption, featuresOption];
         super("C#", ["cs", "csharp"], "cs", options.map(o => o.definition));
         this._listOption = listOption;
@@ -136,6 +118,8 @@ function isValueType(t: Type): boolean {
 }
 
 class CSharpRenderer extends ConvenienceRenderer {
+    private _enumExtensionsNames = Map<Name, Name>();
+
     constructor(
         topLevels: TopLevels,
         private readonly _useList: boolean,
@@ -152,10 +136,7 @@ class CSharpRenderer extends ConvenienceRenderer {
         return ["QuickType", "Converter", "JsonConverter", "Type", "Serialize"];
     }
 
-    protected forbiddenForProperties(
-        c: ClassType,
-        classNamed: Name
-    ): { names: Name[]; namespaces: Namespace[] } {
+    protected forbiddenForProperties(c: ClassType, classNamed: Name): { names: Name[]; namespaces: Namespace[] } {
         return { names: [classNamed], namespaces: [] };
     }
 
@@ -172,7 +153,7 @@ class CSharpRenderer extends ConvenienceRenderer {
     }
 
     protected get caseNamer(): Namer {
-        throw "FIXME: support enums";
+        return namingFunction;
     }
 
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
@@ -188,6 +169,18 @@ class CSharpRenderer extends ConvenienceRenderer {
         const first = definedTypes.first();
         if (first === undefined) return null;
         return first;
+    }
+
+    protected namedTypeDependencyNames(t: NamedType, name: Name): DependencyName[] {
+        if (!(t instanceof EnumType)) return [];
+
+        const extensionsName = new DependencyName(
+            namingFunction,
+            List([name]),
+            (names: List<string>) => `${names.first()}Extensions`
+        );
+        this._enumExtensionsNames = this._enumExtensionsNames.set(name, extensionsName);
+        return [extensionsName];
     }
 
     emitBlock = (f: () => void, semicolon: boolean = false): void => {
@@ -215,9 +208,7 @@ class CSharpRenderer extends ConvenienceRenderer {
             },
             classType => this.nameForNamedType(classType),
             mapType => ["Dictionary<string, ", this.csType(mapType.values, withIssues), ">"],
-            enumType => {
-                throw "FIXME: enums not supported";
-            },
+            enumType => this.nameForNamedType(enumType),
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (nullable) return this.nullableCSType(nullable, withIssues);
@@ -235,8 +226,11 @@ class CSharpRenderer extends ConvenienceRenderer {
         }
     };
 
-    emitClass = (declaration: Sourcelike, name: Sourcelike, emitter: () => void): void => {
-        this.emitLine("public ", declaration, " ", name);
+    emitClass = (isPublic: boolean, declaration: Sourcelike, name: Sourcelike, emitter: () => void): void => {
+        if (isPublic) {
+            declaration = ["public ", declaration];
+        }
+        this.emitLine(declaration, " ", name);
         this.emitBlock(emitter);
     };
 
@@ -246,11 +240,9 @@ class CSharpRenderer extends ConvenienceRenderer {
 
     emitClassDefinition = (c: ClassType, className: Name): void => {
         const jsonProperty = this._dense ? denseJsonPropertyName : "JsonProperty";
-        this.emitClass([this.partialString, "class"], className, () => {
+        this.emitClass(true, [this.partialString, "class"], className, () => {
             if (c.properties.isEmpty()) return;
-            const maxWidth = defined(
-                c.properties.map((_, name: string) => utf16StringEscape(name).length).max()
-            );
+            const maxWidth = defined(c.properties.map((_, name: string) => utf16StringEscape(name).length).max());
             const blankLines = this._needAttributes && !this._dense ? "interposing" : "none";
             this.forEachProperty(c, blankLines, (name, jsonName, t) => {
                 const csType = this.csType(t, true);
@@ -273,13 +265,22 @@ class CSharpRenderer extends ConvenienceRenderer {
 
     emitUnionDefinition = (c: UnionType, unionName: Name): void => {
         const [_, nonNulls] = removeNullFromUnion(c);
-        this.emitClass([this.partialString, "struct"], unionName, () => {
+        this.emitClass(true, [this.partialString, "struct"], unionName, () => {
             nonNulls.forEach((t: Type) => {
                 const csType = this.nullableCSType(t, true);
                 const field = this.unionFieldName(t);
                 this.emitLine("public ", csType, " ", field, ";");
             });
         });
+    };
+
+    emitEnumDefinition = (e: EnumType, enumName: Name): void => {
+        const caseNames: Sourcelike[] = [];
+        this.forEachCase(e, "none", name => {
+            if (caseNames.length > 0) caseNames.push(", ");
+            caseNames.push(name);
+        });
+        this.emitLine("public enum ", enumName, " { ", caseNames, " };");
     };
 
     emitExpressionMember(declare: Sourcelike, define: Sourcelike): void {
@@ -305,12 +306,49 @@ class CSharpRenderer extends ConvenienceRenderer {
             typeKind = definedTypes.first() instanceof ClassType ? "class" : "struct";
         }
         const csType = this.csType(t);
-        this.emitClass([partial, typeKind], name, () => {
+        this.emitClass(true, [partial, typeKind], name, () => {
             // FIXME: Make FromJson a Named
             this.emitExpressionMember(
                 ["public static ", csType, " FromJson(string json)"],
                 ["JsonConvert.DeserializeObject<", csType, ">(json, Converter.Settings)"]
             );
+        });
+    };
+
+    emitEnumExtension = (e: EnumType, enumName: Name): void => {
+        this.emitClass(false, "static class", defined(this._enumExtensionsNames.get(enumName)), () => {
+            this.emitLine("public static ", enumName, " ReadJson(JsonReader reader, JsonSerializer serializer)");
+            this.emitBlock(() => {
+                this.emitLine("switch (serializer.Deserialize<string>(reader))");
+                this.emitBlock(() => {
+                    this.forEachCase(e, "none", (name, jsonName) => {
+                        this.emitLine('case "', utf16StringEscape(jsonName), '": return ', enumName, ".", name, ";");
+                    });
+                });
+                this.emitLine('throw new Exception("Unknown enum case");');
+            });
+            this.emitNewline();
+            this.emitLine(
+                "public static void WriteJson(this ",
+                enumName,
+                " value, JsonWriter writer, JsonSerializer serializer)"
+            );
+            this.emitBlock(() => {
+                this.emitLine("switch (value)");
+                this.emitBlock(() => {
+                    this.forEachCase(e, "none", (name, jsonName) => {
+                        this.emitLine(
+                            "case ",
+                            enumName,
+                            ".",
+                            name,
+                            ': serializer.Serialize(writer, "',
+                            utf16StringEscape(jsonName),
+                            '"); break;'
+                        );
+                    });
+                });
+            });
         });
     };
 
@@ -325,12 +363,7 @@ class CSharpRenderer extends ConvenienceRenderer {
         };
 
         const emitDeserializeType = (t: Type): void => {
-            this.emitLine(
-                this.unionFieldName(t),
-                " = serializer.Deserialize<",
-                this.csType(t),
-                ">(reader);"
-            );
+            this.emitLine(this.unionFieldName(t), " = serializer.Deserialize<", this.csType(t), ">(reader);");
             this.emitLine("break;");
         };
 
@@ -362,7 +395,7 @@ class CSharpRenderer extends ConvenienceRenderer {
         };
 
         const [hasNull, nonNulls] = removeNullFromUnion(u);
-        this.emitClass("partial struct", unionName, () => {
+        this.emitClass(true, "partial struct", unionName, () => {
             this.emitLine("public ", unionName, "(JsonReader reader, JsonSerializer serializer)");
             this.emitBlock(() => {
                 nonNulls.forEach((t: Type) => {
@@ -379,11 +412,7 @@ class CSharpRenderer extends ConvenienceRenderer {
                     emitGenericDeserializer("array", "StartArray");
                     emitGenericDeserializer("class", "StartObject");
                     emitGenericDeserializer("map", "StartObject");
-                    this.emitLine(
-                        'default: throw new Exception("Cannot convert ',
-                        unionName,
-                        '");'
-                    );
+                    this.emitLine('default: throw new Exception("Cannot convert ', unionName, '");');
                 });
             });
             this.emitNewline();
@@ -408,7 +437,7 @@ class CSharpRenderer extends ConvenienceRenderer {
 
     emitSerializeClass = (): void => {
         // FIXME: Make Serialize a Named
-        this.emitClass("static class", "Serialize", () => {
+        this.emitClass(true, "static class", "Serialize", () => {
             this.topLevels.forEach((t: Type, name: string) => {
                 // FIXME: Make ToJson a Named
                 this.emitExpressionMember(
@@ -419,64 +448,77 @@ class CSharpRenderer extends ConvenienceRenderer {
         });
     };
 
-    emitUnionConverterMembers = (unions: Collection<any, UnionType>): void => {
-        const names = unions.map((u: UnionType) => this.nameForNamedType(u)).toOrderedSet();
-        const canConvertExpr = intercalate(
-            " || ",
-            names.map((n: Name): Sourcelike => ["t == typeof(", n, ")"])
-        );
+    emitTypeSwitch<T extends Sourcelike>(
+        types: OrderedSet<T>,
+        typeVar: Sourcelike,
+        withBlock: boolean,
+        withReturn: boolean,
+        f: (t: T) => void
+    ): void {
+        if (withReturn && !withBlock) throw "Can only have return with block";
+        types.forEach(t => {
+            this.emitLine("if (", typeVar, " == typeof(", t, "))");
+            if (withBlock) {
+                this.emitBlock(() => {
+                    f(t);
+                    if (withReturn) {
+                        this.emitLine("return;");
+                    }
+                });
+            } else {
+                this.indent(() => f(t));
+            }
+        });
+    }
+
+    emitConverterMembers = (): void => {
+        const enumNames = this.enums.map(this.nameForNamedType);
+        const unionNames = this.namedUnions.map(this.nameForNamedType);
+        const allNames = enumNames.union(unionNames);
+        const canConvertExpr = intercalate(" || ", allNames.map((n: Name): Sourcelike => ["t == typeof(", n, ")"]));
         // FIXME: make Iterable<any, Sourcelike> a Sourcelike, too?
-        this.emitExpressionMember(
-            "public override bool CanConvert(Type t)",
-            canConvertExpr.toArray()
-        );
+        this.emitExpressionMember("public override bool CanConvert(Type t)", canConvertExpr.toArray());
         this.emitNewline();
         this.emitLine(
             "public override object ReadJson(JsonReader reader, Type t, object existingValue, JsonSerializer serializer)"
         );
         this.emitBlock(() => {
+            this.emitTypeSwitch(enumNames, "t", false, false, n => {
+                const extensionsName = defined(this._enumExtensionsNames.get(n));
+                this.emitLine("return ", extensionsName, ".ReadJson(reader, serializer);");
+            });
             // FIXME: call the constructor via reflection?
-            names.forEach((n: Name) => {
-                this.emitLine("if (t == typeof(", n, "))");
-                this.indent(() => this.emitLine("return new ", n, "(reader, serializer);"));
+            this.emitTypeSwitch(unionNames, "t", false, false, n => {
+                this.emitLine("return new ", n, "(reader, serializer);");
             });
             this.emitLine('throw new Exception("Unknown type");');
         });
         this.emitNewline();
-        this.emitLine(
-            "public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)"
-        );
+        this.emitLine("public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)");
         this.emitBlock(() => {
             this.emitLine("var t = value.GetType();");
-            names.forEach((n: Name) => {
-                this.emitLine("if (t == typeof(", n, "))");
-                this.emitBlock(() => {
-                    this.emitLine("((", n, ")value).WriteJson(writer, serializer);");
-                    this.emitLine("return;");
-                });
+            this.emitTypeSwitch(allNames, "t", true, true, n => {
+                this.emitLine("((", n, ")value).WriteJson(writer, serializer);");
             });
             this.emitLine('throw new Exception("Unknown type");');
         });
     };
 
     emitConverterClass = (): void => {
-        const unions = this.namedUnions;
-        const haveUnions = !unions.isEmpty();
+        const jsonConverter = this.haveEnums || this.haveNamedUnions;
         // FIXME: Make Converter a Named
         let converterName: Sourcelike = ["Converter"];
-        if (haveUnions) converterName = converterName.concat([": JsonConverter"]);
-        this.emitClass("class", converterName, () => {
-            if (haveUnions) {
-                this.emitUnionConverterMembers(unions);
+        if (jsonConverter) converterName = converterName.concat([": JsonConverter"]);
+        this.emitClass(true, "class", converterName, () => {
+            if (jsonConverter) {
+                this.emitConverterMembers();
                 this.emitNewline();
             }
-            this.emitLine(
-                "public static readonly JsonSerializerSettings Settings = new JsonSerializerSettings"
-            );
+            this.emitLine("public static readonly JsonSerializerSettings Settings = new JsonSerializerSettings");
             this.emitBlock(() => {
                 this.emitLine("MetadataPropertyHandling = MetadataPropertyHandling.Ignore,");
                 this.emitLine("DateParseHandling = DateParseHandling.None,");
-                if (haveUnions) {
+                if (this.haveNamedUnions || this.haveEnums) {
                     this.emitLine("Converters = { new Converter() },");
                 }
             }, true);
@@ -516,14 +558,16 @@ class CSharpRenderer extends ConvenienceRenderer {
                 }
             }
             this.forEachClass("leading-and-interposing", this.emitClassDefinition);
+            this.forEachEnum("leading-and-interposing", this.emitEnumDefinition);
             this.forEachUnion("leading-and-interposing", this.emitUnionDefinition);
             if (this._needHelpers) {
                 this.forEachTopLevel("leading-and-interposing", this.emitFromJsonForTopLevel);
+                this.forEachEnum("leading-and-interposing", this.emitEnumExtension);
                 this.forEachUnion("leading-and-interposing", this.emitUnionJSONPartial);
                 this.emitNewline();
                 this.emitSerializeClass();
             }
-            if (this._needHelpers || (this._needAttributes && this.haveNamedUnions)) {
+            if (this._needHelpers || this.haveEnums || (this._needAttributes && this.haveNamedUnions)) {
                 this.emitNewline();
                 this.emitConverterClass();
             }
