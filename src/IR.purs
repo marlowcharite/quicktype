@@ -235,8 +235,8 @@ unifyWithUnion u@(IRUnionRep { names, primitives, arrayType, classRef, mapType, 
         pure $ IRUnion $ IRUnionRep { names: unifyNamed S.union names na, primitives: p, arrayType: a, classRef: c, mapType: m, enumData: e }
     where
         unifyEnumData :: Maybe IREnumData -> Maybe IREnumData -> Maybe IREnumData
-        unifyEnumData (Just (IREnumData { names: n1, values: v1 })) (Just (IREnumData { names: n2, values: v2 })) =
-            Just (IREnumData { names: unifyNamed S.union n1 n2, values: S.union v1 v2 })
+        unifyEnumData (Just (IREnumData { names: n1, cases: v1 })) (Just (IREnumData { names: n2, cases: v2 })) =
+            Just (IREnumData { names: unifyNamed S.union n1 n2, cases: S.union v1 v2 })
         unifyEnumData e1 Nothing = e1
         unifyEnumData Nothing e2 = e2
         addBit b =

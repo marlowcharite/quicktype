@@ -1,0 +1,13 @@
+{
+    "type": "object",
+    "properties": {
+        "lvc": {
+            "enum": ["lawful", "neutral", "chaotic"]
+        },
+        "gve": {
+            "type": "string",
+            "enum": ["good", "neutral", "evil"]
+        }
+    },
+    "required": ["gve"]
+}

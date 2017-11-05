@@ -115,7 +115,7 @@ instance functorNamed :: Functor Named where
 -- | order-preserving map would be nice.
 newtype IRClassData = IRClassData { names :: Named (Set String), properties :: Map String IRType }
 
-newtype IREnumData = IREnumData { names :: Named (Set String), values :: Set String }
+newtype IREnumData = IREnumData { names :: Named (Set String), cases :: Set String }
 
 -- | Unions have names and a set of constituent types.  The set is implemented
 -- | in a specialized way to make union operations more efficient.
@@ -352,11 +352,12 @@ forUnion_ (IRUnionRep { primitives, arrayType, classRef, mapType }) f = do
         inNumber = isInNumber primitives
 
 mapUnionM :: forall a m. Monad m => (IRType -> m a) -> IRUnionRep -> m (List a)
-mapUnionM f (IRUnionRep { primitives, arrayType, classRef, mapType }) = do
+mapUnionM f (IRUnionRep { primitives, arrayType, classRef, mapType, enumData }) = do
     pure L.Nil
         >>= mapGeneral mapType IRMap
         >>= mapGeneral classRef IRClass
         >>= mapGeneral arrayType IRArray
+        >>= mapGeneral enumData IREnum
         >>= mapPrimitive isInPrimitives irUnion_String IRString
         >>= mapPrimitive isInPrimitives irUnion_Bool IRBool
         >>= mapPrimitive isInNumber irUnion_Double IRDouble

@@ -361,6 +361,9 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
                 this.cppType(mapType.values, false, inJsonNamespace, withIssues),
                 ">"
             ],
+            enumType => {
+                throw "FIXME: enums not supported";
+            },
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (!nullable)

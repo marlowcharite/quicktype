@@ -161,9 +161,9 @@ runDoc (Doc w) t graph@(IRGraph { toplevels }) optionValues =
         enumPredicate _ = Nothing
 
         enumNamer :: Namer (Array String) -> Namer (Named (Set String)) -> Namer IREnumData
-        enumNamer nameFromValues properName (IREnumData { names, values }) =
+        enumNamer nameFromCases properName (IREnumData { names, cases }) =
             if namedValue names == S.empty then
-                nameFromValues $ A.fromFoldable values
+                nameFromCases $ A.fromFoldable cases
             else
                 properName names
 

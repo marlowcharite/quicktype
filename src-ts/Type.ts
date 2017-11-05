@@ -150,6 +150,27 @@ export class ClassType extends NamedType {
     }
 }
 
+export class EnumType extends NamedType {
+    kind: "enum";
+
+    constructor(names: TypeNames, readonly cases: OrderedSet<string>) {
+        super("enum", names);
+    }
+
+    get children(): OrderedSet<Type> {
+        return OrderedSet();
+    }
+
+    equals(other: any): boolean {
+        if (!(other instanceof EnumType)) return false;
+        return this.names.names.equals(other.names.names) && this.cases.equals(other.cases);
+    }
+
+    hashCode(): number {
+        return (stringHash(this.kind) + this.names.names.hashCode() + this.cases.hashCode()) | 0;
+    }
+}
+
 export class UnionType extends NamedType {
     kind: "union";
 
@@ -236,6 +257,7 @@ export function splitClassesAndUnions(types: Collection<any, NamedType>): Classe
     return { classes, unions };
 }
 
+// FIXME: add enums and rename to allNamedTypes
 export function allClassesAndUnions(
     graph: TopLevels,
     childrenOfType?: (t: Type) => Collection<any, Type>
@@ -255,6 +277,7 @@ export function matchType<U>(
     arrayType: (arrayType: ArrayType) => U,
     classType: (classType: ClassType) => U,
     mapType: (mapType: MapType) => U,
+    enumType: (enumType: EnumType) => U,
     unionType: (unionType: UnionType) => U
 ): U {
     if (t instanceof PrimitiveType) {
@@ -271,6 +294,7 @@ export function matchType<U>(
     } else if (t instanceof ArrayType) return arrayType(t);
     else if (t instanceof ClassType) return classType(t);
     else if (t instanceof MapType) return mapType(t);
+    else if (t instanceof EnumType) return enumType(t);
     else if (t instanceof UnionType) return unionType(t);
     throw "Unknown Type";
 }

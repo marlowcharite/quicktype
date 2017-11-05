@@ -197,8 +197,8 @@ toIRAndUnify toIR l = do
     StateT.lift $ unifyMultipleTypes $ L.fromFoldable irs
 
 makeEnum :: Named String -> Array String -> JsonIR IRType
-makeEnum name values =
-    pure $ IREnum $ IREnumData { name: map S.singleton name, values: S.fromFoldable values }
+makeEnum name cases =
+    pure $ IREnum $ IREnumData { names: map S.singleton name, cases: S.fromFoldable cases }
 
 jsonSchemaToIR :: JSONSchema -> ReversePath -> Named String -> JSONSchema -> JsonIR IRType
 jsonSchemaToIR root reversePath name schema@(JSONSchema schemaProps)
@@ -292,6 +292,7 @@ renderer =
         , forbiddenNames
         , topLevelName: noForbidNamer jsonNameStyle -- FIXME: put title on top levels, too
         , unions: Nothing
+        , enums: Nothing
         }
     }
 
@@ -337,9 +338,9 @@ strMapForType t =
         propertyType <- jsonForType m
         sm <- typeStrMap "object"
         pure $ SM.insert "additionalProperties" propertyType sm
-    IREnum (IREnumData { values }) -> do
+    IREnum (IREnumData { cases }) -> do
         sm <- typeStrMap "string"
-        pure $ SM.insert "enum" (fromArray $ A.fromFoldable values) sm
+        pure $ SM.insert "enum" (fromArray $ A.fromFoldable $ S.map fromString cases) sm
     IRUnion ur -> do
         types <- mapUnionM jsonForType ur
         let typesJson = fromArray $ A.fromFoldable types

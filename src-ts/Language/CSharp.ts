@@ -7,9 +7,11 @@ import {
     PrimitiveType,
     ArrayType,
     MapType,
+    EnumType,
     UnionType,
     NamedType,
     ClassType,
+    matchType,
     nullableFromUnion,
     removeNullFromUnion
 } from "../Type";
@@ -191,40 +193,33 @@ class CSharpRenderer extends ConvenienceRenderer {
     };
 
     csType = (t: Type, withIssues: boolean = false): Sourcelike => {
-        if (t instanceof PrimitiveType) {
-            switch (t.kind) {
-                case "any":
-                    return maybeAnnotated(withIssues, anyTypeIssueAnnotation, "object");
-                case "null":
-                    return maybeAnnotated(withIssues, nullTypeIssueAnnotation, "object");
-                case "bool":
-                    return "bool";
-                case "integer":
-                    return "long";
-                case "double":
-                    return "double";
-                case "string":
-                    return "string";
-                default:
-                    assertNever(t.kind);
+        return matchType<Sourcelike>(
+            t,
+            anyType => maybeAnnotated(withIssues, anyTypeIssueAnnotation, "object"),
+            nullType => maybeAnnotated(withIssues, nullTypeIssueAnnotation, "object"),
+            boolType => "bool",
+            integerType => "long",
+            doubleType => "double",
+            stringType => "string",
+            arrayType => {
+                const itemsType = this.csType(arrayType.items, withIssues);
+                if (this._useList) {
+                    return ["List<", itemsType, ">"];
+                } else {
+                    return [itemsType, "[]"];
+                }
+            },
+            classType => this.nameForNamedType(classType),
+            mapType => ["Dictionary<string, ", this.csType(mapType.values, withIssues), ">"],
+            enumType => {
+                throw "FIXME: enums not supported";
+            },
+            unionType => {
+                const nullable = nullableFromUnion(unionType);
+                if (nullable) return this.nullableCSType(nullable, withIssues);
+                return this.nameForNamedType(unionType);
             }
-        } else if (t instanceof ArrayType) {
-            const itemsType = this.csType(t.items, withIssues);
-            if (this._useList) {
-                return ["List<", itemsType, ">"];
-            } else {
-                return [itemsType, "[]"];
-            }
-        } else if (t instanceof ClassType) {
-            return this.nameForNamedType(t);
-        } else if (t instanceof MapType) {
-            return ["Dictionary<string, ", this.csType(t.values, withIssues), ">"];
-        } else if (t instanceof UnionType) {
-            const nonNull = nullableFromUnion(t);
-            if (nonNull) return this.nullableCSType(nonNull, withIssues);
-            return this.nameForNamedType(t);
-        }
-        throw "Unknown type";
+        );
     };
 
     nullableCSType = (t: Type, withIssues: boolean): Sourcelike => {

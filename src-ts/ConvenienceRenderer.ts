@@ -9,11 +9,13 @@ import {
     ArrayType,
     MapType,
     ClassType,
+    EnumType,
     UnionType,
     allClassesAndUnions,
     allNamedTypes,
     splitClassesAndUnions,
-    nullableFromUnion
+    nullableFromUnion,
+    matchType
 } from "./Type";
 import {
     Namespace,
@@ -155,35 +157,21 @@ export abstract class ConvenienceRenderer extends Renderer {
     }
 
     protected unionFieldName = (fieldType: Type): string => {
-        const typeNameForUnionMember = (t: Type): string => {
-            if (t instanceof PrimitiveType) {
-                switch (t.kind) {
-                    case "any":
-                        return "anything";
-                    case "null":
-                        return "null";
-                    case "bool":
-                        return "bool";
-                    case "integer":
-                        return "long";
-                    case "double":
-                        return "double";
-                    case "string":
-                        return "string";
-                    default:
-                        assertNever(t.kind);
-                }
-            } else if (t instanceof ArrayType) {
-                return typeNameForUnionMember(t.items) + "_array";
-            } else if (t instanceof ClassType) {
-                return defined(this.names.get(this.nameForNamedType(t)));
-            } else if (t instanceof MapType) {
-                return typeNameForUnionMember(t.values), "_map";
-            } else if (t instanceof UnionType) {
-                return "union";
-            }
-            throw "Unknown type";
-        };
+        const typeNameForUnionMember = (t: Type): string =>
+            matchType(
+                t,
+                anyType => "anything",
+                nullType => "null",
+                boolType => "bool",
+                integerType => "integer",
+                doubleType => "double",
+                stringType => "string",
+                arrayType => typeNameForUnionMember(arrayType.items) + "_array",
+                classType => defined(this.names.get(this.nameForNamedType(classType))),
+                mapType => typeNameForUnionMember(mapType.values) + "_map",
+                enumType => "enum",
+                unionType => "union"
+            );
 
         return this.propertyNamer.nameStyle(typeNameForUnionMember(fieldType));
     };

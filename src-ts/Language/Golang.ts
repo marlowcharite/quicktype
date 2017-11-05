@@ -142,6 +142,9 @@ class GoRenderer extends ConvenienceRenderer {
             arrayType => ["[]", this.goType(arrayType.items, withIssues)],
             classType => this.nameForNamedType(classType),
             mapType => ["map[string]", this.goType(mapType.values, withIssues)],
+            enumType => {
+                throw "FIXME: enums not supported";
+            },
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (nullable) return this.nullableGoType(nullable, withIssues);
@@ -171,7 +174,11 @@ class GoRenderer extends ConvenienceRenderer {
         let columns: Sourcelike[][] = [];
         this.forEachProperty(c, "none", (name, jsonName, t) => {
             const goType = this.goType(t, true);
-            columns.push([[name, " "], [goType, " "], ['`json:"', utf16StringEscape(jsonName), '"`']]);
+            columns.push([
+                [name, " "],
+                [goType, " "],
+                ['`json:"', utf16StringEscape(jsonName), '"`']
+            ]);
         });
         this.emitStruct(className, columns);
     };

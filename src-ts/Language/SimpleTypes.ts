@@ -124,6 +124,7 @@ class SimpleTypesRenderer extends ConvenienceRenderer {
             arrayType => ["List<", this.sourceFor(arrayType.items), ">"],
             classType => this.nameForNamedType(classType),
             mapType => ["Map<String, ", this.sourceFor(mapType.values), ">"],
+            enumType => this.nameForNamedType(enumType),
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (nullable) return ["Maybe<", this.sourceFor(nullable), ">"];
