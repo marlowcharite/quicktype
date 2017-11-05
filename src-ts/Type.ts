@@ -232,7 +232,7 @@ export function allNamedTypes(
 
         const children = childrenOfType ? childrenOfType(t) : t.children;
         children.forEach(addFromType);
-        if (t instanceof ClassType || t instanceof UnionType) {
+        if (t.isNamedType()) {
             types = types.push(t);
         }
     }
@@ -241,29 +241,32 @@ export function allNamedTypes(
     return types.reverse().toOrderedSet();
 }
 
-export type ClassesAndUnions = {
+export type SeparatedNamedTypes = {
     classes: OrderedSet<ClassType>;
+    enums: OrderedSet<EnumType>;
     unions: OrderedSet<UnionType>;
 };
 
-export function splitClassesAndUnions(types: Collection<any, NamedType>): ClassesAndUnions {
+export function separateNamedTypes(types: Collection<any, NamedType>): SeparatedNamedTypes {
     const classes = types
         .filter((t: NamedType) => t instanceof ClassType)
         .toOrderedSet() as OrderedSet<ClassType>;
+    const enums = types
+        .filter((t: NamedType) => t instanceof EnumType)
+        .toOrderedSet() as OrderedSet<EnumType>;
     const unions = types
         .filter((t: NamedType) => t instanceof UnionType)
         .toOrderedSet() as OrderedSet<UnionType>;
 
-    return { classes, unions };
+    return { classes, enums, unions };
 }
 
-// FIXME: add enums and rename to allNamedTypes
-export function allClassesAndUnions(
+export function allNamedTypesSeparated(
     graph: TopLevels,
     childrenOfType?: (t: Type) => Collection<any, Type>
-): ClassesAndUnions {
+): SeparatedNamedTypes {
     const types = allNamedTypes(graph, childrenOfType);
-    return splitClassesAndUnions(types);
+    return separateNamedTypes(types);
 }
 
 export function matchType<U>(

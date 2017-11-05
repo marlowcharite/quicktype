@@ -10,6 +10,7 @@ import {
     PrimitiveType,
     ArrayType,
     MapType,
+    EnumType,
     UnionType,
     NamedType,
     ClassType,
@@ -149,6 +150,10 @@ class SimpleTypesRenderer extends ConvenienceRenderer {
         this.emitLine("}");
     };
 
+    emitEnum = (e: EnumType, enumName: Name) => {
+        this.emitLine("enum ", enumName, " = ", intercalate(" | ", e.cases).toArray());
+    };
+
     emitUnion = (u: UnionType, unionName: Name) => {
         this.emitLine("union ", unionName, " {");
         this.indent(() => {
@@ -161,6 +166,7 @@ class SimpleTypesRenderer extends ConvenienceRenderer {
 
     protected emitSourceStructure() {
         this.forEachClass("interposing", this.emitClass);
+        this.forEachEnum("leading-and-interposing", this.emitEnum);
         if (!this.inlineUnions) {
             this.forEachUnion("leading-and-interposing", this.emitUnion);
         }
