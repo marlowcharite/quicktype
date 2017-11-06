@@ -9,6 +9,7 @@ import {
     PrimitiveType,
     NamedType,
     ClassType,
+    EnumType,
     UnionType,
     nullableFromUnion,
     matchType,
@@ -16,12 +17,12 @@ import {
 } from "../Type";
 import { Namespace, Name, DependencyName, Namer, funPrefixNamer } from "../Naming";
 import {
-    utf16LegalizeCharacters,
+    legalizeCharacters,
     camelCase,
     startWithLetter,
     isLetterOrUnderscore,
     isLetterOrUnderscoreOrDigit,
-    utf16StringEscape,
+    stringEscape,
     defined
 } from "../Support";
 import { StringOption } from "../RendererOptions";
@@ -52,7 +53,7 @@ export default class GoTargetLanguage extends TypeScriptTargetLanguage {
 
 const namingFunction = funPrefixNamer(goNameStyle);
 
-const legalizeName = utf16LegalizeCharacters(isLetterOrUnderscoreOrDigit);
+const legalizeName = legalizeCharacters(isLetterOrUnderscoreOrDigit);
 
 function goNameStyle(original: string): string {
     const legalized = legalizeName(original);
@@ -61,11 +62,11 @@ function goNameStyle(original: string): string {
 }
 
 const primitiveValueTypeKinds: TypeKind[] = ["integer", "double", "bool", "string"];
-const compoundTypeKinds: TypeKind[] = ["array", "class", "map"];
+const compoundTypeKinds: TypeKind[] = ["array", "class", "map", "enum"];
 
 function isValueType(t: Type): boolean {
     const kind = t.kind;
-    return primitiveValueTypeKinds.indexOf(kind) >= 0 || kind === "class";
+    return primitiveValueTypeKinds.indexOf(kind) >= 0 || kind === "class" || kind === "enum";
 }
 
 class GoRenderer extends ConvenienceRenderer {
@@ -88,7 +89,11 @@ class GoRenderer extends ConvenienceRenderer {
     }
 
     protected get caseNamer(): Namer {
-        throw "FIXME: support enums";
+        return namingFunction;
+    }
+
+    protected get casesInGlobalNamespace(): boolean {
+        return true;
     }
 
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
@@ -104,10 +109,7 @@ class GoRenderer extends ConvenienceRenderer {
             List([topLevelName]),
             (names: List<string>) => `Unmarshal${names.first()}`
         );
-        this._topLevelUnmarshalNames = this._topLevelUnmarshalNames.set(
-            topLevelName,
-            unmarshalName
-        );
+        this._topLevelUnmarshalNames = this._topLevelUnmarshalNames.set(topLevelName, unmarshalName);
         return [unmarshalName];
     }
 
@@ -146,9 +148,7 @@ class GoRenderer extends ConvenienceRenderer {
             arrayType => ["[]", this.goType(arrayType.items, withIssues)],
             classType => this.nameForNamedType(classType),
             mapType => ["map[string]", this.goType(mapType.values, withIssues)],
-            enumType => {
-                throw "FIXME: enums not supported";
-            },
+            enumType => this.nameForNamedType(enumType),
             unionType => {
                 const nullable = nullableFromUnion(unionType);
                 if (nullable) return this.nullableGoType(nullable, withIssues);
@@ -178,13 +178,56 @@ class GoRenderer extends ConvenienceRenderer {
         let columns: Sourcelike[][] = [];
         this.forEachProperty(c, "none", (name, jsonName, t) => {
             const goType = this.goType(t, true);
-            columns.push([
-                [name, " "],
-                [goType, " "],
-                ['`json:"', utf16StringEscape(jsonName), '"`']
-            ]);
+            columns.push([[name, " "], [goType, " "], ['`json:"', stringEscape(jsonName), '"`']]);
         });
         this.emitStruct(className, columns);
+    };
+
+    private emitEnum = (e: EnumType, enumName: Name): void => {
+        this.emitLine("type ", enumName, " int");
+        this.emitLine("const (");
+        let onFirst = true;
+        this.indent(() =>
+            this.forEachCase(e, "none", name => {
+                if (onFirst) {
+                    this.emitLine(name, " ", enumName, " = iota");
+                } else {
+                    this.emitLine(name);
+                }
+                onFirst = false;
+            })
+        );
+        this.emitLine(")");
+        this.emitNewline();
+        this.emitFunc(["(x *", enumName, ") UnmarshalJSON(data []byte) error"], () => {
+            this.emitMultiline(`dec := json.NewDecoder(bytes.NewReader(data))
+tok, err := dec.Token()
+if err != nil {
+    return err
+}`);
+            this.emitBlock("if v, ok := tok.(string); ok", () => {
+                this.emitBlock("switch v", () => {
+                    this.forEachCase(e, "none", (name, jsonName) => {
+                        this.emitLine('case "', stringEscape(jsonName), '":');
+                        this.indent(() => this.emitLine("*x = ", name));
+                    });
+                    this.emitLine("default:");
+                    this.indent(() => this.emitLine('return errors.New("Unknown enum value")'));
+                });
+                this.emitLine("return nil");
+            });
+            this.emitLine('return errors.New("Value for enum must be string")');
+        });
+        this.emitNewline();
+        this.emitFunc(["(x *", enumName, ") MarshalJSON() ([]byte, error)"], () => {
+            this.emitBlock("switch *x", () => {
+                this.forEachCase(e, "none", (name, jsonName) => {
+                    this.emitLine("case ", name, ":");
+                    this.indent(() => this.emitLine('return json.Marshal("', stringEscape(jsonName), '")'));
+                });
+            });
+            this.emitLine('panic("Invalid enum value")');
+        });
     };
 
     private emitUnion = (c: UnionType, unionName: Name): void => {
@@ -212,16 +255,11 @@ class GoRenderer extends ConvenienceRenderer {
         ): Sourcelike => {
             const args: Sourcelike = [];
             for (const kind of primitiveValueTypeKinds) {
-                args.push(
-                    ifMember(kind, "nil", (_1, fieldName, _2) => primitiveArg(fieldName)),
-                    ", "
-                );
+                args.push(ifMember(kind, "nil", (_1, fieldName, _2) => primitiveArg(fieldName)), ", ");
             }
             for (const kind of compoundTypeKinds) {
                 args.push(
-                    ifMember(kind, "false, nil", (t, fieldName, _) =>
-                        compoundArg(t.kind === "class", fieldName)
-                    ),
+                    ifMember(kind, "false, nil", (t, fieldName, _) => compoundArg(t.kind === "class", fieldName)),
                     ", "
                 );
             }
@@ -273,33 +311,28 @@ class GoRenderer extends ConvenienceRenderer {
     };
 
     protected emitSourceStructure(): void {
-        this.emitLine(
-            "// To parse and unparse this JSON data, add this code to your project and do:"
-        );
+        this.emitLine("// To parse and unparse this JSON data, add this code to your project and do:");
         this.forEachTopLevel("none", (t: Type, name: Name) => {
             this.emitLine("//");
-            this.emitLine(
-                "//    r, err := ",
-                defined(this._topLevelUnmarshalNames.get(name)),
-                "(bytes)"
-            );
+            this.emitLine("//    r, err := ", defined(this._topLevelUnmarshalNames.get(name)), "(bytes)");
             this.emitLine("//    bytes, err = r.Marshal()");
         });
         this.emitNewline();
         this.emitLine("package ", this._packageName);
         this.emitNewline();
-        if (this.haveNamedUnions) {
+        if (this.haveEnums || this.haveNamedUnions) {
             this.emitLine('import "bytes"');
             this.emitLine('import "errors"');
         }
         this.emitLine('import "encoding/json"');
         this.forEachTopLevel("leading-and-interposing", this.emitTopLevel);
         this.forEachClass("leading-and-interposing", this.emitClass);
+        this.forEachEnum("leading-and-interposing", this.emitEnum);
         this.forEachUnion("leading-and-interposing", this.emitUnion);
         if (this.haveNamedUnions) {
             this.emitNewline();
             this
-                .emitMultiline(`func unmarshalUnion(data []byte, pi **int64, pf **float64, pb **bool, ps **string, haveArray bool, pa interface{}, haveObject bool, pc interface{}, haveMap bool, pm interface{}, nullable bool) (bool, error) {
+                .emitMultiline(`func unmarshalUnion(data []byte, pi **int64, pf **float64, pb **bool, ps **string, haveArray bool, pa interface{}, haveObject bool, pc interface{}, haveMap bool, pm interface{}, haveEnum bool, pe interface{}, nullable bool) (bool, error) {
     if pi != nil {
         *pi = nil
     }
@@ -347,6 +380,9 @@ class GoRenderer extends ConvenienceRenderer {
         }
         return false, errors.New("Union does not contain bool")
     case string:
+        if haveEnum {
+            return false, json.Unmarshal(data, pe)
+        }
         if ps != nil {
             *ps = &v
             return false, nil
@@ -379,7 +415,7 @@ class GoRenderer extends ConvenienceRenderer {
 
 }
 
-func marshalUnion(pi *int64, pf *float64, pb *bool, ps *string, haveArray bool, pa interface{}, haveObject bool, pc interface{}, haveMap bool, pm interface{}, nullable bool) ([]byte, error) {
+func marshalUnion(pi *int64, pf *float64, pb *bool, ps *string, haveArray bool, pa interface{}, haveObject bool, pc interface{}, haveMap bool, pm interface{}, haveEnum bool, pe interface{}, nullable bool) ([]byte, error) {
     if pi != nil {
         return json.Marshal(*pi)
     }
@@ -400,6 +436,9 @@ func marshalUnion(pi *int64, pf *float64, pb *bool, ps *string, haveArray bool, 
     }
     if haveMap {
         return json.Marshal(pm)
+    }
+    if haveEnum {
+        return json.Marshal(pe)
     }
     if nullable {
         return json.Marshal(nil)
