@@ -7,6 +7,19 @@
         "gve": {
             "type": "string",
             "enum": ["good", "neutral", "evil"]
+        },
+        "arr": {
+            "type": "array",
+            "items": {
+                "oneOf": [
+                    {
+                        "enum": ["foo", "bar"]
+                    },
+                    {
+                        "type": "integer"
+                    }
+                ]
+            }
         }
     },
     "required": ["gve"]

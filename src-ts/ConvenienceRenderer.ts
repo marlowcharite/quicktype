@@ -17,15 +17,7 @@ import {
     nullableFromUnion,
     matchType
 } from "./Type";
-import {
-    Namespace,
-    Name,
-    Namer,
-    FixedName,
-    SimpleName,
-    DependencyName,
-    keywordNamespace
-} from "./Naming";
+import { Namespace, Name, Namer, FixedName, SimpleName, DependencyName, keywordNamespace } from "./Naming";
 import { Renderer, BlankLineLocations } from "./Renderer";
 import { defined, assertNever } from "./Support";
 import { Sourcelike, sourcelikeToSource, serializeRenderResult } from "./Source";
@@ -47,17 +39,11 @@ export abstract class ConvenienceRenderer extends Renderer {
         return [];
     }
 
-    protected forbiddenForProperties(
-        c: ClassType,
-        classNamed: Name
-    ): { names: Name[]; namespaces: Namespace[] } {
+    protected forbiddenForProperties(c: ClassType, classNamed: Name): { names: Name[]; namespaces: Namespace[] } {
         return { names: [], namespaces: [] };
     }
 
-    protected forbiddenForCases(
-        e: EnumType,
-        enumNamed: Name
-    ): { names: Name[]; namespaces: Namespace[] } {
+    protected forbiddenForCases(e: EnumType, enumNamed: Name): { names: Name[]; namespaces: Namespace[] } {
         return { names: [], namespaces: [] };
     }
 
@@ -75,6 +61,10 @@ export abstract class ConvenienceRenderer extends Renderer {
     protected abstract get caseNamer(): Namer;
     protected abstract namedTypeToNameForTopLevel(type: Type): NamedType | null;
     protected abstract emitSourceStructure(): void;
+
+    protected get casesInGlobalNamespace(): boolean {
+        return false;
+    }
 
     protected unionNeedsName(u: UnionType): boolean {
         return !nullableFromUnion(u);
@@ -138,16 +128,8 @@ export abstract class ConvenienceRenderer extends Renderer {
     };
 
     private addPropertyNameds = (c: ClassType, classNamed: Name): void => {
-        const {
-            names: forbiddenNames,
-            namespaces: forbiddenNamespace
-        } = this.forbiddenForProperties(c, classNamed);
-        const ns = new Namespace(
-            c.names.combined,
-            this.globalNamespace,
-            Set(forbiddenNamespace),
-            Set(forbiddenNames)
-        );
+        const { names: forbiddenNames, namespaces: forbiddenNamespace } = this.forbiddenForProperties(c, classNamed);
+        const ns = new Namespace(c.names.combined, this.globalNamespace, Set(forbiddenNamespace), Set(forbiddenNames));
         const names = c.properties
             .map((t: Type, name: string) => {
                 return ns.add(new SimpleName(name, this.propertyNamer));
@@ -158,16 +140,13 @@ export abstract class ConvenienceRenderer extends Renderer {
 
     // FIXME: this is very similar to addPropertyNameds
     private addCaseNameds = (e: EnumType, enumNamed: Name): void => {
-        const { names: forbiddenNames, namespaces: forbiddenNamespace } = this.forbiddenForCases(
-            e,
-            enumNamed
-        );
-        const ns = new Namespace(
-            e.names.combined,
-            this.globalNamespace,
-            Set(forbiddenNamespace),
-            Set(forbiddenNames)
-        );
+        const { names: forbiddenNames, namespaces: forbiddenNamespace } = this.forbiddenForCases(e, enumNamed);
+        let ns: Namespace;
+        if (this.casesInGlobalNamespace) {
+            ns = this.globalNamespace;
+        } else {
+            ns = new Namespace(e.names.combined, this.globalNamespace, Set(forbiddenNamespace), Set(forbiddenNames));
+        }
         let names = Map<string, Name>();
         e.cases.forEach((name: string) => {
             names = names.set(name, ns.add(new SimpleName(name, this.caseNamer)));
@@ -180,9 +159,7 @@ export abstract class ConvenienceRenderer extends Renderer {
         if (t instanceof ClassType) {
             const propertyNameds = defined(this._propertyNames.get(t));
             return t.properties
-                .sortBy((_, n: string): string =>
-                    defined(names.get(defined(propertyNameds.get(n))))
-                )
+                .sortBy((_, n: string): string => defined(names.get(defined(propertyNameds.get(n)))))
                 .toOrderedSet();
         }
         return t.children.toOrderedSet();
@@ -235,10 +212,7 @@ export abstract class ConvenienceRenderer extends Renderer {
         return defined(this._namesForNamedTypes.get(t));
     };
 
-    protected forEachTopLevel = (
-        blankLocations: BlankLineLocations,
-        f: (t: Type, name: Name) => void
-    ): void => {
+    protected forEachTopLevel = (blankLocations: BlankLineLocations, f: (t: Type, name: Name) => void): void => {
         this.forEachWithBlankLines(this.topLevels, blankLocations, (t: Type, name: string) =>
             f(t, defined(this._topLevelNames.get(name)))
         );
@@ -250,9 +224,7 @@ export abstract class ConvenienceRenderer extends Renderer {
         f: (name: Name, jsonName: string, t: Type) => void
     ): void => {
         const propertyNames = defined(this._propertyNames.get(c));
-        const sortedPropertyNames = propertyNames
-            .sortBy((n: Name) => this.names.get(n))
-            .toOrderedMap();
+        const sortedPropertyNames = propertyNames.sortBy((n: Name) => this.names.get(n)).toOrderedMap();
         this.forEachWithBlankLines(sortedPropertyNames, blankLocations, (name, jsonName) => {
             const t = defined(c.properties.get(jsonName));
             f(name, jsonName, t);
@@ -283,24 +255,15 @@ export abstract class ConvenienceRenderer extends Renderer {
         });
     }
 
-    protected forEachClass = (
-        blankLocations: BlankLineLocations,
-        f: (c: ClassType, className: Name) => void
-    ): void => {
+    protected forEachClass = (blankLocations: BlankLineLocations, f: (c: ClassType, className: Name) => void): void => {
         this.forEachSpecificNamedType(blankLocations, this._namedClasses, f);
     };
 
-    protected forEachEnum = (
-        blankLocations: BlankLineLocations,
-        f: (u: EnumType, enumName: Name) => void
-    ): void => {
+    protected forEachEnum = (blankLocations: BlankLineLocations, f: (u: EnumType, enumName: Name) => void): void => {
         this.forEachSpecificNamedType(blankLocations, this._namedEnums, f);
     };
 
-    protected forEachUnion = (
-        blankLocations: BlankLineLocations,
-        f: (u: UnionType, unionName: Name) => void
-    ): void => {
+    protected forEachUnion = (blankLocations: BlankLineLocations, f: (u: UnionType, unionName: Name) => void): void => {
         this.forEachSpecificNamedType(blankLocations, this._namedUnions, f);
     };
 

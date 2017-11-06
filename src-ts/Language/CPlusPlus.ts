@@ -44,39 +44,32 @@ export default class CPlusPlusTargetLanguage extends TypeScriptTargetLanguage {
     private readonly _uniquePtrOption: EnumOption<boolean>;
 
     constructor() {
-        const namespaceOption = new StringOption(
-            "namespace",
-            "Name of the generated namespace",
-            "NAME",
-            "quicktype"
-        );
+        const namespaceOption = new StringOption("namespace", "Name of the generated namespace", "NAME", "quicktype");
         const pascalValue: [string, NamingStyle] = ["pascal-case", "pascal"];
         const underscoreValue: [string, NamingStyle] = ["underscore-case", "underscore"];
         const camelValue: [string, NamingStyle] = ["camel-case", "camel"];
-        const upperUnderscoreValue: [string, NamingStyle] = [
-            "upper-underscore-case",
-            "upper-underscore"
-        ];
-        const typeNamingStyleOption = new EnumOption<NamingStyle>(
-            "type-style",
-            "Naming style for types",
-            [pascalValue, underscoreValue, camelValue, upperUnderscoreValue]
-        );
-        const memberNamingStyleOption = new EnumOption<NamingStyle>(
-            "member-style",
-            "Naming style for members",
-            [underscoreValue, pascalValue, camelValue, upperUnderscoreValue]
-        );
+        const upperUnderscoreValue: [string, NamingStyle] = ["upper-underscore-case", "upper-underscore"];
+        const typeNamingStyleOption = new EnumOption<NamingStyle>("type-style", "Naming style for types", [
+            pascalValue,
+            underscoreValue,
+            camelValue,
+            upperUnderscoreValue
+        ]);
+        const memberNamingStyleOption = new EnumOption<NamingStyle>("member-style", "Naming style for members", [
+            underscoreValue,
+            pascalValue,
+            camelValue,
+            upperUnderscoreValue
+        ]);
         const enumeratorNamingStyleOption = new EnumOption<NamingStyle>(
             "enumerator-style",
             "Naming style for enumerators",
             [upperUnderscoreValue, underscoreValue, pascalValue, camelValue]
         );
-        const uniquePtrOption = new EnumOption(
-            "unions",
-            "Use containment or indirection for unions",
-            [["containment", false], ["indirection", true]]
-        );
+        const uniquePtrOption = new EnumOption("unions", "Use containment or indirection for unions", [
+            ["containment", false],
+            ["indirection", true]
+        ]);
         super("C++", ["c++", "cpp", "cplusplus"], "cpp", [
             namespaceOption.definition,
             typeNamingStyleOption.definition,
@@ -268,10 +261,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         return keywords;
     }
 
-    protected forbiddenForProperties(
-        c: ClassType,
-        classNamed: Name
-    ): { names: Name[]; namespaces: Namespace[] } {
+    protected forbiddenForProperties(c: ClassType, classNamed: Name): { names: Name[]; namespaces: Namespace[] } {
         return { names: [], namespaces: [this.globalNamespace] };
     }
 
@@ -353,33 +343,18 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
         return ["std::unique_ptr<", typeSrc, ">"];
     };
 
-    private cppType = (
-        t: Type,
-        inVariant: boolean,
-        inJsonNamespace: boolean,
-        withIssues: boolean
-    ): Sourcelike => {
+    private cppType = (t: Type, inVariant: boolean, inJsonNamespace: boolean, withIssues: boolean): Sourcelike => {
         return matchType<Sourcelike>(
             t,
             anyType =>
-                maybeAnnotated(withIssues, anyTypeIssueAnnotation, [
-                    this.jsonQualifier(inJsonNamespace),
-                    "json"
-                ]),
+                maybeAnnotated(withIssues, anyTypeIssueAnnotation, [this.jsonQualifier(inJsonNamespace), "json"]),
             nullType =>
-                maybeAnnotated(withIssues, nullTypeIssueAnnotation, [
-                    this.jsonQualifier(inJsonNamespace),
-                    "json"
-                ]),
+                maybeAnnotated(withIssues, nullTypeIssueAnnotation, [this.jsonQualifier(inJsonNamespace), "json"]),
             boolType => "bool",
             integerType => "int64_t",
             doubleType => "double",
             stringType => "std::string",
-            arrayType => [
-                "std::vector<",
-                this.cppType(arrayType.items, false, inJsonNamespace, withIssues),
-                ">"
-            ],
+            arrayType => ["std::vector<", this.cppType(arrayType.items, false, inJsonNamespace, withIssues), ">"],
             classType =>
                 this.variantIndirection(inVariant, [
                     "struct ",
@@ -394,14 +369,8 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
             enumType => [this.ourQualifier(inJsonNamespace), this.nameForNamedType(enumType)],
             unionType => {
                 const nullable = nullableFromUnion(unionType);
-                if (!nullable)
-                    return [this.ourQualifier(inJsonNamespace), this.nameForNamedType(unionType)];
-                return [
-                    this._optionalType,
-                    "<",
-                    this.cppType(nullable, false, inJsonNamespace, withIssues),
-                    ">"
-                ];
+                if (!nullable) return [this.ourQualifier(inJsonNamespace), this.nameForNamedType(unionType)];
+                return [this._optionalType, "<", this.cppType(nullable, false, inJsonNamespace, withIssues), ">"];
             }
         );
     };
@@ -439,41 +408,21 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
                         }
                     }
                     if (t.kind === "null" || t.kind === "any") {
-                        this.emitLine(
-                            "_x.",
-                            name,
-                            " = ",
-                            ourQualifier,
-                            'get_untyped(_j, "',
-                            stringEscape(json),
-                            '");'
-                        );
+                        this.emitLine("_x.", name, " = ", ourQualifier, 'get_untyped(_j, "', stringEscape(json), '");');
                         return;
                     }
                     const cppType = this.cppType(t, false, true, false);
-                    this.emitLine(
-                        "_x.",
-                        name,
-                        ' = _j.at("',
-                        stringEscape(json),
-                        '").get<',
-                        cppType,
-                        ">();"
-                    );
+                    this.emitLine("_x.", name, ' = _j.at("', stringEscape(json), '").get<', cppType, ">();");
                 });
             }
         );
         this.emitNewline();
-        this.emitBlock(
-            ["inline void to_json(json& _j, const struct ", ourQualifier, className, "& _x)"],
-            false,
-            () => {
-                this.emitLine("_j = json::object();");
-                this.forEachProperty(c, "none", (name, json, _) => {
-                    this.emitLine('_j["', stringEscape(json), '"] = _x.', name, ";");
-                });
-            }
-        );
+        this.emitBlock(["inline void to_json(json& _j, const struct ", ourQualifier, className, "& _x)"], false, () => {
+            this.emitLine("_j = json::object();");
+            this.forEachProperty(c, "none", (name, json, _) => {
+                this.emitLine('_j["', stringEscape(json), '"] = _x.', name, ";");
+            });
+        });
     };
 
     private emitEnum = (e: EnumType, enumName: Name): void => {
@@ -497,103 +446,80 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
             ["string", "is_string"],
             ["class", "is_object"],
             ["map", "is_object"],
-            ["array", "is_array"]
+            ["array", "is_array"],
+            ["enum", "is_string"]
         ];
         const [_, nonNulls] = removeNullFromUnion(u);
         const variantType = this.cppTypeInOptional(nonNulls, true, false);
-        this.emitBlock(
-            ["inline void from_json(const json& _j, ", variantType, "& _x)"],
-            false,
-            () => {
-                let onFirst = true;
-                for (const [kind, func] of functionForKind) {
-                    const typeForKind = nonNulls.find((t: Type) => t.kind === kind);
-                    if (typeForKind === undefined) continue;
-                    this.emitLine(onFirst ? "if" : "else if", " (_j.", func, "())");
-                    this.indent(() => {
-                        this.emitLine(
-                            "_x = _j.get<",
-                            this.cppType(typeForKind, true, true, false),
-                            ">();"
-                        );
-                    });
-                    onFirst = false;
-                }
-                this.emitLine('else throw "Could not deserialize";');
-            }
-        );
-        this.emitNewline();
-        this.emitBlock(
-            ["inline void to_json(json& _j, const ", variantType, "& _x)"],
-            false,
-            () => {
-                this.emitBlock("switch (_x.which())", false, () => {
-                    let i = 0;
-                    nonNulls.forEach((t: Type) => {
-                        this.emitLine("case ", i.toString(), ":");
-                        this.indent(() => {
-                            this.emitLine(
-                                "_j = boost::get<",
-                                this.cppType(t, true, true, false),
-                                ">(_x);"
-                            );
-                            this.emitLine("break;");
-                        });
-                        i++;
-                    });
-                    this.emitLine('default: throw "Input JSON does not conform to schema";');
+        this.emitBlock(["inline void from_json(const json& _j, ", variantType, "& _x)"], false, () => {
+            let onFirst = true;
+            for (const [kind, func] of functionForKind) {
+                const typeForKind = nonNulls.find((t: Type) => t.kind === kind);
+                if (typeForKind === undefined) continue;
+                this.emitLine(onFirst ? "if" : "else if", " (_j.", func, "())");
+                this.indent(() => {
+                    this.emitLine("_x = _j.get<", this.cppType(typeForKind, true, true, false), ">();");
                 });
+                onFirst = false;
             }
-        );
+            this.emitLine('else throw "Could not deserialize";');
+        });
+        this.emitNewline();
+        this.emitBlock(["inline void to_json(json& _j, const ", variantType, "& _x)"], false, () => {
+            this.emitBlock("switch (_x.which())", false, () => {
+                let i = 0;
+                nonNulls.forEach((t: Type) => {
+                    this.emitLine("case ", i.toString(), ":");
+                    this.indent(() => {
+                        this.emitLine("_j = boost::get<", this.cppType(t, true, true, false), ">(_x);");
+                        this.emitLine("break;");
+                    });
+                    i++;
+                });
+                this.emitLine('default: throw "Input JSON does not conform to schema";');
+            });
+        });
     };
 
     private emitEnumFunctions = (e: EnumType, enumName: Name): void => {
         const ourQualifier = this.ourQualifier(true);
-        this.emitBlock(
-            ["inline void from_json(const json& _j, ", ourQualifier, enumName, "& _x)"],
-            false,
-            () => {
-                let onFirst = true;
+        this.emitBlock(["inline void from_json(const json& _j, ", ourQualifier, enumName, "& _x)"], false, () => {
+            let onFirst = true;
+            this.forEachCase(e, "none", (name, jsonName) => {
+                const maybeElse = onFirst ? "" : "else ";
+                this.emitLine(
+                    maybeElse,
+                    'if (_j == "',
+                    stringEscape(jsonName),
+                    '") _x = ',
+                    ourQualifier,
+                    enumName,
+                    "::",
+                    name,
+                    ";"
+                );
+                onFirst = false;
+            });
+            this.emitLine('else throw "Input JSON does not conform to schema";');
+        });
+        this.emitNewline();
+        this.emitBlock(["inline void to_json(json& _j, const ", ourQualifier, enumName, "& _x)"], false, () => {
+            this.emitBlock("switch (_x)", false, () => {
                 this.forEachCase(e, "none", (name, jsonName) => {
-                    const maybeElse = onFirst ? "" : "else ";
                     this.emitLine(
-                        maybeElse,
-                        'if (_j == "',
-                        stringEscape(jsonName),
-                        '") _x = ',
+                        "case ",
                         ourQualifier,
                         enumName,
                         "::",
                         name,
-                        ";"
+                        ': _j = "',
+                        stringEscape(jsonName),
+                        '"; break;'
                     );
-                    onFirst = false;
                 });
-                this.emitLine('else throw "Input JSON does not conform to schema";');
-            }
-        );
-        this.emitNewline();
-        this.emitBlock(
-            ["inline void to_json(json& _j, const ", ourQualifier, enumName, "& _x)"],
-            false,
-            () => {
-                this.emitBlock("switch (_x)", false, () => {
-                    this.forEachCase(e, "none", (name, jsonName) => {
-                        this.emitLine(
-                            "case ",
-                            ourQualifier,
-                            enumName,
-                            "::",
-                            name,
-                            ': _j = "',
-                            stringEscape(jsonName),
-                            '"; break;'
-                        );
-                    });
-                    this.emitLine('default: throw "This should not happen";');
-                });
-            }
-        );
+                this.emitLine('default: throw "This should not happen";');
+            });
+        });
     };
 
     private emitTopLevelTypedef = (t: Type, name: Name): void => {
@@ -605,10 +531,7 @@ class CPlusPlusRenderer extends ConvenienceRenderer {
     private emitAllUnionFunctions = (): void => {
         this.forEachUniqueUnion(
             "interposing",
-            u =>
-                this.sourcelikeToString(
-                    this.cppTypeInOptional(removeNullFromUnion(u)[1], true, false)
-                ),
+            u => this.sourcelikeToString(this.cppTypeInOptional(removeNullFromUnion(u)[1], true, false)),
             this.emitUnionFunctions
         );
     };

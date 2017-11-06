@@ -26,7 +26,7 @@ import {
     assertNever
 } from "../Support";
 import { Namespace, Name, DependencyName, Namer, funPrefixNamer } from "../Naming";
-import { PrimitiveTypeKind, TypeKind } from "Reykjavik";
+import { TypeKind } from "Reykjavik";
 import { RenderResult } from "../Renderer";
 import { ConvenienceRenderer } from "../ConvenienceRenderer";
 import { TypeScriptTargetLanguage } from "../TargetLanguage";
@@ -114,7 +114,7 @@ function csNameStyle(original: string): string {
 }
 
 function isValueType(t: Type): boolean {
-    return ["integer", "double", "bool"].indexOf(t.kind) >= 0;
+    return ["integer", "double", "bool", "enum"].indexOf(t.kind) >= 0;
 }
 
 class CSharpRenderer extends ConvenienceRenderer {
@@ -154,6 +154,16 @@ class CSharpRenderer extends ConvenienceRenderer {
 
     protected get caseNamer(): Namer {
         return namingFunction;
+    }
+
+    nullableFromUnion = (u: UnionType): Type | null => {
+        const nullable = nullableFromUnion(u);
+        if (!nullable || nullable.kind === "enum") return null;
+        return nullable;
+    };
+
+    protected unionNeedsName(u: UnionType): boolean {
+        return !this.nullableFromUnion(u);
     }
 
     protected namedTypeToNameForTopLevel(type: Type): NamedType | null {
@@ -210,7 +220,7 @@ class CSharpRenderer extends ConvenienceRenderer {
             mapType => ["Dictionary<string, ", this.csType(mapType.values, withIssues), ">"],
             enumType => this.nameForNamedType(enumType),
             unionType => {
-                const nullable = nullableFromUnion(unionType);
+                const nullable = this.nullableFromUnion(unionType);
                 if (nullable) return this.nullableCSType(nullable, withIssues);
                 return this.nameForNamedType(unionType);
             }
@@ -367,7 +377,7 @@ class CSharpRenderer extends ConvenienceRenderer {
             this.emitLine("break;");
         };
 
-        const emitPrimitiveDeserializer = (tokenTypes: string[], kind: PrimitiveTypeKind): void => {
+        const emitDeserializer = (tokenTypes: string[], kind: TypeKind): void => {
             const t = u.findMember(kind);
             if (!t) return;
 
@@ -386,14 +396,6 @@ class CSharpRenderer extends ConvenienceRenderer {
             this.indent(() => emitDeserializeType(t));
         };
 
-        const emitGenericDeserializer = (kind: TypeKind, tokenType: string): void => {
-            const t = u.findMember(kind);
-            if (!t) return;
-
-            tokenCase(tokenType);
-            this.indent(() => emitDeserializeType(t));
-        };
-
         const [hasNull, nonNulls] = removeNullFromUnion(u);
         this.emitClass(true, "partial struct", unionName, () => {
             this.emitLine("public ", unionName, "(JsonReader reader, JsonSerializer serializer)");
@@ -405,13 +407,14 @@ class CSharpRenderer extends ConvenienceRenderer {
                 this.emitLine("switch (reader.TokenType)");
                 this.emitBlock(() => {
                     if (hasNull) emitNullDeserializer();
-                    emitPrimitiveDeserializer(["Integer"], "integer");
+                    emitDeserializer(["Integer"], "integer");
                     emitDoubleSerializer();
-                    emitPrimitiveDeserializer(["Boolean"], "bool");
-                    emitPrimitiveDeserializer(["String", "Date"], "string");
-                    emitGenericDeserializer("array", "StartArray");
-                    emitGenericDeserializer("class", "StartObject");
-                    emitGenericDeserializer("map", "StartObject");
+                    emitDeserializer(["Boolean"], "bool");
+                    emitDeserializer(["String", "Date"], "string");
+                    emitDeserializer(["StartArray"], "array");
+                    emitDeserializer(["StartObject"], "class");
+                    emitDeserializer(["String"], "enum");
+                    emitDeserializer(["StartObject"], "map");
                     this.emitLine('default: throw new Exception("Cannot convert ', unionName, '");');
                 });
             });
